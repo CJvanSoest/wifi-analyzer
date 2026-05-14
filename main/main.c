@@ -297,35 +297,38 @@ static void render_graph(void) {
     float rssi_range   = 70.0f;  // -95 to -25
     float sigma        = 1.8f;   // bell width in channel units (~3 channels wide)
 
-    // Draw one curve per AP, limit to 20 to avoid overdraw
-    int draw_count = ap_count < 20 ? ap_count : 20;
+    // Draw one curve per AP, limit to 15 to avoid clutter
+    int draw_count = ap_count < 15 ? ap_count : 15;
 
-    // Draw filled curves bottom-up per pixel column for smooth overlap
-    for (int px = 0; px < w; px++) {
-        // Convert pixel to channel position (float)
-        float ch_pos = ((float)px - x_margin) / x_scale + 1.0f;
+    // Draw each curve as a polyline (not filled) — 1px wide line per AP
+    for (int i = draw_count - 1; i >= 0; i--) {
+        float mu        = (float)ap_list[i].primary;
+        float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
+        if (norm_rssi < 0.0f) norm_rssi = 0.0f;
+        if (norm_rssi > 1.0f) norm_rssi = 1.0f;
 
-        // For each AP, accumulate the highest curve value at this pixel
-        // Draw each AP curve independently (painter's algorithm, weakest first)
-        for (int i = draw_count - 1; i >= 0; i--) {
-            float mu      = (float)ap_list[i].primary;
-            float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
-            if (norm_rssi < 0.0f) norm_rssi = 0.0f;
-            if (norm_rssi > 1.0f) norm_rssi = 1.0f;
+        float     peak_h = norm_rssi * (float)content_h;
+        pax_col_t color  = GRAPH_COLORS[i % 10];
 
-            float peak_h  = norm_rssi * (float)content_h;
+        int prev_y = bottom;
+        for (int px = 0; px < w; px++) {
+            float ch_pos  = ((float)px - x_margin) / x_scale + 1.0f;
             float curve_y = gauss(ch_pos, mu, sigma) * peak_h;
+            int   cur_y   = bottom - (int)curve_y;
 
-            int bar_h = (int)curve_y;
-            if (bar_h <= 0) continue;
-
-            pax_col_t color = GRAPH_COLORS[i % 10];
-            // Draw semi-transparent filled column: draw line from bottom up
-            pax_simple_rect(&fb, color, px, bottom - bar_h, 1, bar_h);
+            // Draw vertical segment between prev and current y to avoid gaps
+            int y0 = prev_y < cur_y ? prev_y : cur_y;
+            int y1 = prev_y < cur_y ? cur_y  : prev_y;
+            if (y1 - y0 > 1) {
+                pax_simple_rect(&fb, color, px, y0, 1, y1 - y0);
+            } else {
+                pax_simple_rect(&fb, color, px, cur_y, 1, 2);
+            }
+            prev_y = cur_y;
         }
     }
 
-    // Draw SSID labels at curve peaks (strongest first, skip if channel out of view)
+    // Draw SSID labels at curve peaks with colored background for readability
     for (int i = 0; i < draw_count; i++) {
         uint8_t ch = ap_list[i].primary;
         if (ch < 1 || ch > 13) continue;
@@ -335,17 +338,18 @@ static void render_graph(void) {
         if (norm_rssi > 1.0f) norm_rssi = 1.0f;
 
         int peak_px = (int)(x_margin + (ch - 1) * x_scale);
-        int peak_py = bottom - (int)(norm_rssi * content_h) - 14;
-        if (peak_py < top) peak_py = top;
+        int peak_py = bottom - (int)(norm_rssi * content_h) - 16;
+        if (peak_py < top + 2) peak_py = top + 2;
 
-        // Truncate SSID to 10 chars for label
-        char lbl[12];
-        strncpy(lbl, (char *)ap_list[i].ssid, 10);
-        lbl[10] = '\0';
-        if (strlen(lbl) == 0) strncpy(lbl, "?", 2);
+        // Truncate SSID to 12 chars
+        char lbl[20];
+        snprintf(lbl, sizeof(lbl), "%d:%.12s", i + 1, (char *)ap_list[i].ssid);
+        if (strlen((char *)ap_list[i].ssid) == 0) snprintf(lbl, sizeof(lbl), "%d:(hidden)", i + 1);
 
         pax_col_t color = GRAPH_COLORS[i % 10];
-        pax_draw_text(&fb, color, pax_font_sky_mono, 11, peak_px - 20, peak_py, lbl);
+        // Dark background behind label for contrast
+        pax_simple_rect(&fb, 0xCC0D1117, peak_px - 2, peak_py - 1, 90, 14);
+        pax_draw_text(&fb, color, pax_font_sky_mono, 12, peak_px, peak_py, lbl);
     }
 }
 
