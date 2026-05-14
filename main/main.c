@@ -237,11 +237,15 @@ static void render_list(void) {
 
         if ((i % 2) == 0) pax_simple_rect(&fb, COLOR_ROW_ALT, 0, y, w, row_h);
 
-        // SSID
+        // SSID — show BSSID (MAC) for hidden networks so manufacturer is identifiable
         char ssid[33];
         strncpy(ssid, (char *)ap_list[i].ssid, 32);
         ssid[32] = '\0';
-        if (strlen(ssid) == 0) strncpy(ssid, "(hidden)", 9);
+        if (strlen(ssid) == 0) {
+            snprintf(ssid, sizeof(ssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     ap_list[i].bssid[0], ap_list[i].bssid[1], ap_list[i].bssid[2],
+                     ap_list[i].bssid[3], ap_list[i].bssid[4], ap_list[i].bssid[5]);
+        }
         pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, 10, y + 5, ssid);
 
         // Channel
@@ -328,7 +332,11 @@ static void render_graph(void) {
         }
     }
 
-    // Draw SSID labels at curve peaks with colored background for readability
+    // Draw SSID labels at curve peaks with de-collision to prevent overlap
+    int placed_x[15] = {0};
+    int placed_y[15] = {0};
+    int placed_count = 0;
+
     for (int i = 0; i < draw_count; i++) {
         uint8_t ch = ap_list[i].primary;
         if (ch < 1 || ch > 13) continue;
@@ -338,18 +346,38 @@ static void render_graph(void) {
         if (norm_rssi > 1.0f) norm_rssi = 1.0f;
 
         int peak_px = (int)(x_margin + (ch - 1) * x_scale);
-        int peak_py = bottom - (int)(norm_rssi * content_h) - 16;
-        if (peak_py < top + 2) peak_py = top + 2;
+        int lbl_y   = bottom - (int)(norm_rssi * content_h) - 16;
 
-        // Truncate SSID to 12 chars
+        // De-collision: push label down if it overlaps an already placed label
+        bool moved = true;
+        while (moved) {
+            moved = false;
+            for (int j = 0; j < placed_count; j++) {
+                if (abs(placed_x[j] - peak_px) < 92 && abs(placed_y[j] - lbl_y) < 14) {
+                    lbl_y = placed_y[j] + 14; // shift below conflicting label
+                    moved = true;
+                }
+            }
+        }
+        if (lbl_y > bottom - 4) lbl_y = bottom - 4;
+        if (lbl_y < top + 2)    lbl_y = top + 2;
+
+        placed_x[placed_count] = peak_px;
+        placed_y[placed_count] = lbl_y;
+        placed_count++;
+
+        // Build label: number + SSID (or OUI for hidden)
         char lbl[20];
-        snprintf(lbl, sizeof(lbl), "%d:%.12s", i + 1, (char *)ap_list[i].ssid);
-        if (strlen((char *)ap_list[i].ssid) == 0) snprintf(lbl, sizeof(lbl), "%d:(hidden)", i + 1);
+        if (strlen((char *)ap_list[i].ssid) == 0) {
+            snprintf(lbl, sizeof(lbl), "%d:%02X:%02X:%02X", i + 1,
+                     ap_list[i].bssid[0], ap_list[i].bssid[1], ap_list[i].bssid[2]);
+        } else {
+            snprintf(lbl, sizeof(lbl), "%d:%.12s", i + 1, (char *)ap_list[i].ssid);
+        }
 
         pax_col_t color = GRAPH_COLORS[i % 10];
-        // Dark background behind label for contrast
-        pax_simple_rect(&fb, 0xCC0D1117, peak_px - 2, peak_py - 1, 90, 14);
-        pax_draw_text(&fb, color, pax_font_sky_mono, 12, peak_px, peak_py, lbl);
+        pax_simple_rect(&fb, 0xCC0D1117, peak_px - 2, lbl_y - 1, 92, 14);
+        pax_draw_text(&fb, color, pax_font_sky_mono, 12, peak_px, lbl_y, lbl);
     }
 }
 
