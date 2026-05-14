@@ -1,38 +1,47 @@
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "bsp/device.h"
 #include "bsp/display.h"
 #include "bsp/input.h"
-#include "bsp/led.h"
 #include "bsp/power.h"
-#include "custom_certificates.h"
 #include "driver/gpio.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lcd_types.h"
 #include "esp_log.h"
-#include "hal/lcd_types.h"
+#include "esp_wifi.h"
 #include "nvs_flash.h"
 #include "pax_fonts.h"
 #include "pax_gfx.h"
 #include "pax_text.h"
 #include "pax_types.h"
-#include "portmacro.h"
 #include "wifi_connection.h"
 #include "wifi_remote.h"
 
-// Constants
-static char const TAG[] = "main";
+static char const TAG[] = "wifi-analyzer";
 
-#if defined(CONFIG_BSP_TARGET_KAMI)
-#define BLACK 0
-#define WHITE 1
-#define RED   2
-#else
-#define BLACK 0xFF000000
-#define WHITE 0xFFFFFFFF
-#define RED   0xFFFF0000
-#endif
+// Colors (dark theme)
+#define COLOR_BG      0xFF0D1117
+#define COLOR_HEADER  0xFF161B22
+#define COLOR_ROW_ALT 0xFF1C2128
+#define COLOR_TEXT    0xFFCDD9E5
+#define COLOR_DIM     0xFF768390
+#define COLOR_ACCENT  0xFF539BF5
+#define COLOR_GOOD    0xFF57AB5A  // >= -60 dBm
+#define COLOR_OK      0xFFCFBA06  // >= -70 dBm
+#define COLOR_FAIR    0xFFDB6D28  // >= -80 dBm
+#define COLOR_POOR    0xFFE5534B  // <  -80 dBm
 
-// Global variables
+#define VIEW_CHANNELS 0
+#define VIEW_LIST     1
+#define VIEW_GRAPH    2
+
+// 10 distinct colors for SSID curves in graph view
+static const pax_col_t GRAPH_COLORS[] = {
+    0xFF539BF5, 0xFF57AB5A, 0xFFDB6D28, 0xFFE5534B, 0xFFCFBA06,
+    0xFFDCAEFA, 0xFF6CB6FF, 0xFFFFA657, 0xFF79C0FF, 0xFF56D364,
+};
+
+// Display state
 static size_t                     display_h_res        = 0;
 static size_t                     display_v_res        = 0;
 static bsp_display_color_format_t display_color_format = 0;
@@ -40,307 +49,423 @@ static bsp_display_endianness_t   display_data_endian  = 0;
 static pax_buf_t                  fb                   = {0};
 static QueueHandle_t              input_event_queue    = NULL;
 
-#if defined(CONFIG_BSP_TARGET_KAMI)
-// Temporary addition for supporting epaper devices (irrelevant for Tanmatsu)
-static pax_col_t palette[] = {0xffffffff, 0xff000000, 0xffff0000};  // white, black, red
-#endif
+// App state
+static wifi_ap_record_t *ap_list  = NULL;
+static uint16_t          ap_count = 0;
+static int               view     = VIEW_CHANNELS;
+static int               list_scroll = 0;
+static bool              wifi_ready  = false;
 
 static void blit(void) {
-    esp_err_t res = bsp_display_blit(0, 0, display_h_res, display_v_res, pax_buf_get_pixels(&fb));
-    if (res != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to blit to display: %d", res);
+    bsp_display_blit(0, 0, display_h_res, display_v_res, pax_buf_get_pixels(&fb));
+}
+
+static pax_col_t rssi_color(int8_t rssi) {
+    if (rssi >= -60) return COLOR_GOOD;
+    if (rssi >= -70) return COLOR_OK;
+    if (rssi >= -80) return COLOR_FAIR;
+    return COLOR_POOR;
+}
+
+static int compare_rssi(const void *a, const void *b) {
+    return (int)((wifi_ap_record_t *)b)->rssi - (int)((wifi_ap_record_t *)a)->rssi;
+}
+
+static void show_message(const char *msg) {
+    int w = pax_buf_get_width(&fb);
+    int h = pax_buf_get_height(&fb);
+    pax_background(&fb, COLOR_BG);
+    pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 18, w / 2 - 100, h / 2 - 9, msg);
+    blit();
+}
+
+static void do_scan(void) {
+    show_message("Scanning WiFi networks...");
+
+    if (ap_list) {
+        free(ap_list);
+        ap_list  = NULL;
+        ap_count = 0;
+    }
+
+    // wifi_connection_init_stack() leaves WiFi stopped.
+    // Must set STA mode and start before scanning (same pattern as wifi_connection_connect).
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "set_mode failed: %d", err);
+        show_message("WiFi mode error - press R to retry");
+        return;
+    }
+    err = esp_wifi_start();
+    if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
+        ESP_LOGE(TAG, "wifi_start failed: %d", err);
+        show_message("WiFi start error - press R to retry");
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(200)); // brief settle time
+
+    wifi_scan_config_t scan_cfg = {
+        .ssid        = NULL,
+        .bssid       = NULL,
+        .channel     = 0,
+        .show_hidden = true,
+        .scan_type   = WIFI_SCAN_TYPE_ACTIVE,
+    };
+
+    err = esp_wifi_scan_start(&scan_cfg, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Scan failed: %d", err);
+        show_message("Scan failed - press R to retry");
+        return;
+    }
+
+    esp_wifi_scan_get_ap_num(&ap_count);
+    if (ap_count > 0) {
+        ap_list = malloc(sizeof(wifi_ap_record_t) * ap_count);
+        if (ap_list) {
+            esp_wifi_scan_get_ap_records(&ap_count, ap_list);
+            qsort(ap_list, ap_count, sizeof(wifi_ap_record_t), compare_rssi);
+        } else {
+            ap_count = 0;
+        }
+    }
+
+    list_scroll = 0;
+    ESP_LOGI(TAG, "Found %u networks", ap_count);
+}
+
+static void render_header(void) {
+    int  w = pax_buf_get_width(&fb);
+    char title[80];
+    const char *view_name = view == VIEW_CHANNELS ? "Channels" : (view == VIEW_LIST ? "List" : "Graph");
+    snprintf(title, sizeof(title), "WiFi Analyzer  %u networks  [%s]", ap_count, view_name);
+    pax_simple_rect(&fb, COLOR_HEADER, 0, 0, w, 28);
+    pax_draw_text(&fb, COLOR_ACCENT, pax_font_sky_mono, 16, 8, 6, title);
+}
+
+static void render_footer(void) {
+    int w = pax_buf_get_width(&fb);
+    int h = pax_buf_get_height(&fb);
+    pax_simple_rect(&fb, COLOR_HEADER, 0, h - 22, w, 22);
+    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, 8, h - 17,
+                  "F1/ESC=Exit  Tab=Switch View  R=Rescan  W/S=Scroll");
+}
+
+static void render_channels(void) {
+    int w         = pax_buf_get_width(&fb);
+    int h         = pax_buf_get_height(&fb);
+    int top       = 28;
+    int bottom    = h - 22;
+    int label_h   = 18;
+    int content_h = bottom - top - label_h;
+
+    // Strongest RSSI and AP count per channel (1-13)
+    int8_t best[14];
+    int    cnt[14];
+    for (int i = 0; i < 14; i++) { best[i] = -110; cnt[i] = 0; }
+
+    for (int i = 0; i < ap_count; i++) {
+        uint8_t ch = ap_list[i].primary;
+        if (ch >= 1 && ch <= 13) {
+            cnt[ch]++;
+            if (ap_list[i].rssi > best[ch]) best[ch] = ap_list[i].rssi;
+        }
+    }
+
+    int slot_w = (w - 20) / 13;
+
+    for (int ch = 1; ch <= 13; ch++) {
+        int x     = 10 + (ch - 1) * slot_w;
+        int bar_w = slot_w - 6;
+        int lbl_y = bottom - label_h;
+
+        // Channel number label
+        char lbl[4];
+        snprintf(lbl, sizeof(lbl), "%d", ch);
+        pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, x + slot_w / 2 - 5, lbl_y, lbl);
+
+        if (cnt[ch] == 0) continue;
+
+        // Bar height: map -95..-30 dBm → 0..content_h
+        int bar_h = (best[ch] + 95) * content_h / 65;
+        if (bar_h < 6) bar_h = 6;
+        if (bar_h > content_h) bar_h = content_h;
+
+        int bar_x = x + 3;
+        int bar_y = lbl_y - bar_h;
+
+        pax_simple_rect(&fb, rssi_color(best[ch]), bar_x, bar_y, bar_w, bar_h);
+
+        // RSSI value above bar
+        char rssi_str[6];
+        snprintf(rssi_str, sizeof(rssi_str), "%d", best[ch]);
+        pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 11, bar_x + 1, bar_y - 14, rssi_str);
+
+        // AP count on bar (if > 1)
+        if (cnt[ch] > 1) {
+            char cnt_str[12];
+            snprintf(cnt_str, sizeof(cnt_str), "%d", cnt[ch]);
+            pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 11, bar_x + 2, bar_y + 2, cnt_str);
+        }
     }
 }
 
-static void display_message(const char* message) {
-    if (pax_buf_get_width(&fb) > 0) {
-        pax_background(&fb, BLACK);
-        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 0, message);
-        blit();
-    } else {
-        ESP_LOGI(TAG, "Message: %s", message);
+static void render_list(void) {
+    int w       = pax_buf_get_width(&fb);
+    int h       = pax_buf_get_height(&fb);
+    int top     = 28;
+    int row_h   = 24;
+    int max_vis = (h - 28 - 22 - row_h) / row_h; // subtract column header row
+
+    // Column headers
+    pax_simple_rect(&fb, COLOR_HEADER, 0, top, w, row_h);
+    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, 10,      top + 5, "SSID");
+    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 170, top + 5, "CH");
+    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 120, top + 5, "RSSI");
+    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 60,  top + 5, "SEC");
+    top += row_h;
+
+    // Scroll indicator
+    if (ap_count > (uint16_t)max_vis) {
+        char scroll_info[20];
+        snprintf(scroll_info, sizeof(scroll_info), "%d/%u", list_scroll + 1, ap_count);
+        pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 70, 8, scroll_info);
     }
+
+    for (int i = list_scroll; i < ap_count && (i - list_scroll) < max_vis; i++) {
+        int y = top + (i - list_scroll) * row_h;
+
+        if ((i % 2) == 0) pax_simple_rect(&fb, COLOR_ROW_ALT, 0, y, w, row_h);
+
+        // SSID
+        char ssid[33];
+        strncpy(ssid, (char *)ap_list[i].ssid, 32);
+        ssid[32] = '\0';
+        if (strlen(ssid) == 0) strncpy(ssid, "(hidden)", 9);
+        pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, 10, y + 5, ssid);
+
+        // Channel
+        char tmp[16];
+        snprintf(tmp, sizeof(tmp), "%2u", ap_list[i].primary);
+        pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, w - 170, y + 5, tmp);
+
+        // RSSI with signal color
+        snprintf(tmp, sizeof(tmp), "%4d", ap_list[i].rssi);
+        pax_draw_text(&fb, rssi_color(ap_list[i].rssi), pax_font_sky_mono, 14, w - 120, y + 5, tmp);
+
+        // Security
+        const char *sec = (ap_list[i].authmode == WIFI_AUTH_OPEN) ? "open" : "lock";
+        pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, w - 60, y + 5, sec);
+    }
+}
+
+// Gaussian bell curve: value at x given center mu and sigma
+static float gauss(float x, float mu, float sigma) {
+    float d = (x - mu) / sigma;
+    return expf(-0.5f * d * d);
+}
+
+// Graph view: one bell curve per SSID, x=channel, y=RSSI strength
+static void render_graph(void) {
+    int w         = pax_buf_get_width(&fb);
+    int h         = pax_buf_get_height(&fb);
+    int top       = 28;
+    int bottom    = h - 22 - 18; // leave room for channel labels
+    int content_h = bottom - top;
+    int label_y   = bottom;
+
+    // Channel axis: channels 1-13, map to x pixels
+    // Leave margin on sides so channel 1 and 13 have room for bell shape
+    float x_margin = 30.0f;
+    float x_scale  = (float)(w - 2 * x_margin) / 12.0f; // 12 gaps between ch1..ch13
+
+    // Draw channel labels
+    for (int ch = 1; ch <= 13; ch++) {
+        int x = (int)(x_margin + (ch - 1) * x_scale);
+        char lbl[4];
+        snprintf(lbl, sizeof(lbl), "%d", ch);
+        pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 12, x - 5, label_y, lbl);
+        // Tick mark
+        pax_simple_rect(&fb, COLOR_DIM, x, bottom - 4, 1, 4);
+    }
+
+    // Horizontal baseline
+    pax_simple_rect(&fb, COLOR_DIM, (int)x_margin, bottom, w - 2 * (int)x_margin, 1);
+
+    // RSSI range: -95 (floor) to -25 (ceiling) maps to 0..content_h
+    float rssi_floor   = -95.0f;
+    float rssi_range   = 70.0f;  // -95 to -25
+    float sigma        = 1.8f;   // bell width in channel units (~3 channels wide)
+
+    // Draw one curve per AP, limit to 20 to avoid overdraw
+    int draw_count = ap_count < 20 ? ap_count : 20;
+
+    // Draw filled curves bottom-up per pixel column for smooth overlap
+    for (int px = 0; px < w; px++) {
+        // Convert pixel to channel position (float)
+        float ch_pos = ((float)px - x_margin) / x_scale + 1.0f;
+
+        // For each AP, accumulate the highest curve value at this pixel
+        // Draw each AP curve independently (painter's algorithm, weakest first)
+        for (int i = draw_count - 1; i >= 0; i--) {
+            float mu      = (float)ap_list[i].primary;
+            float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
+            if (norm_rssi < 0.0f) norm_rssi = 0.0f;
+            if (norm_rssi > 1.0f) norm_rssi = 1.0f;
+
+            float peak_h  = norm_rssi * (float)content_h;
+            float curve_y = gauss(ch_pos, mu, sigma) * peak_h;
+
+            int bar_h = (int)curve_y;
+            if (bar_h <= 0) continue;
+
+            pax_col_t color = GRAPH_COLORS[i % 10];
+            // Draw semi-transparent filled column: draw line from bottom up
+            pax_simple_rect(&fb, color, px, bottom - bar_h, 1, bar_h);
+        }
+    }
+
+    // Draw SSID labels at curve peaks (strongest first, skip if channel out of view)
+    for (int i = 0; i < draw_count; i++) {
+        uint8_t ch = ap_list[i].primary;
+        if (ch < 1 || ch > 13) continue;
+
+        float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
+        if (norm_rssi < 0.0f) norm_rssi = 0.0f;
+        if (norm_rssi > 1.0f) norm_rssi = 1.0f;
+
+        int peak_px = (int)(x_margin + (ch - 1) * x_scale);
+        int peak_py = bottom - (int)(norm_rssi * content_h) - 14;
+        if (peak_py < top) peak_py = top;
+
+        // Truncate SSID to 10 chars for label
+        char lbl[12];
+        strncpy(lbl, (char *)ap_list[i].ssid, 10);
+        lbl[10] = '\0';
+        if (strlen(lbl) == 0) strncpy(lbl, "?", 2);
+
+        pax_col_t color = GRAPH_COLORS[i % 10];
+        pax_draw_text(&fb, color, pax_font_sky_mono, 11, peak_px - 20, peak_py, lbl);
+    }
+}
+
+static void render(void) {
+    pax_background(&fb, COLOR_BG);
+    render_header();
+    if (view == VIEW_CHANNELS) {
+        render_channels();
+    } else if (view == VIEW_LIST) {
+        render_list();
+    } else {
+        render_graph();
+    }
+    render_footer();
+    blit();
 }
 
 void app_main(void) {
-    // Start the GPIO interrupt service
     gpio_install_isr_service(0);
 
-    // Initialize the Non Volatile Storage partition
+    // NVS init
     esp_err_t res = nvs_flash_init();
     if (res == ESP_ERR_NVS_NO_FREE_PAGES || res == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        res = nvs_flash_erase();
-        if (res != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to erase NVS flash: %d", res);
-            return;
-        }
+        nvs_flash_erase();
         res = nvs_flash_init();
     }
-    if (res != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize NVS flash: %d", res);
-        return;
-    }
+    if (res != ESP_OK) return;
 
-    // Initialize the Board Support Package
-    const bsp_configuration_t bsp_configuration = {
-        .display =
-            {
-                .requested_color_format = BSP_DISPLAY_COLOR_FORMAT_24_888RGB,
-                .num_fbs                = 1,
-            },
+    // BSP init
+    const bsp_configuration_t bsp_cfg = {
+        .display = {
+            .requested_color_format = BSP_DISPLAY_COLOR_FORMAT_24_888RGB,
+            .num_fbs                = 1,
+        },
     };
-    res = bsp_device_initialize(&bsp_configuration);
-    if (res != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize BSP: %d", res);
-        return;
-    }
+    if (bsp_device_initialize(&bsp_cfg) != ESP_OK) return;
 
-    // Get display parameters and rotation
+    // Display init (copied from template to handle all color formats / rotations)
     res = bsp_display_get_parameters(&display_h_res, &display_v_res, &display_color_format, &display_data_endian);
-    if (res != ESP_ERR_NOT_SUPPORTED) {
-        if (res != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to get display parameters: %d", res);
-            return;
-        }
-
-        // Convert ESP-IDF color format into PAX buffer type
-        pax_buf_type_t format = PAX_BUF_24_888RGB;
+    if (res == ESP_OK) {
+        pax_buf_type_t fmt = PAX_BUF_24_888RGB;
         switch (display_color_format) {
-            case BSP_DISPLAY_COLOR_FORMAT_1_PAL:
-                format = PAX_BUF_1_PAL;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_2_PAL:
-                format = PAX_BUF_2_PAL;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_4_PAL:
-                format = PAX_BUF_4_PAL;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_8_PAL:
-                format = PAX_BUF_8_PAL;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_16_PAL:
-                format = PAX_BUF_16_PAL;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_1_GREY:
-                format = PAX_BUF_1_GREY;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_2_GREY:
-                format = PAX_BUF_2_GREY;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_4_GREY:
-                format = PAX_BUF_4_GREY;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_8_GREY:
-                format = PAX_BUF_8_GREY;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_8_332RGB:
-                format = PAX_BUF_8_332RGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_16_565RGB:
-                format = PAX_BUF_16_565RGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_4_1111ARGB:
-                format = PAX_BUF_4_1111ARGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_8_2222ARGB:
-                format = PAX_BUF_8_2222ARGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_16_4444ARGB:
-                format = PAX_BUF_16_4444ARGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_24_888RGB:
-                format = PAX_BUF_24_888RGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_32_8888ARGB:
-                format = PAX_BUF_32_8888ARGB;
-                break;
-            case BSP_DISPLAY_COLOR_FORMAT_18_666RGB:
-            default:
-                ESP_LOGW(TAG, "BSP requests color format not supported by PAX (%u)", format);
-                break;
+            case BSP_DISPLAY_COLOR_FORMAT_16_565RGB:   fmt = PAX_BUF_16_565RGB;   break;
+            case BSP_DISPLAY_COLOR_FORMAT_32_8888ARGB: fmt = PAX_BUF_32_8888ARGB; break;
+            default: break;
         }
-
-        // Convert BSP display rotation format into PAX orientation type
-        bsp_display_rotation_t display_rotation = bsp_display_get_default_rotation();
-        pax_orientation_t      orientation      = PAX_O_UPRIGHT;
-        switch (display_rotation) {
-            case BSP_DISPLAY_ROTATION_90:
-                orientation = PAX_O_ROT_CCW;
-                break;
-            case BSP_DISPLAY_ROTATION_180:
-                orientation = PAX_O_ROT_HALF;
-                break;
-            case BSP_DISPLAY_ROTATION_270:
-                orientation = PAX_O_ROT_CW;
-                break;
-            case BSP_DISPLAY_ROTATION_0:
-            default:
-                orientation = PAX_O_UPRIGHT;
-                break;
+        bsp_display_rotation_t rot = bsp_display_get_default_rotation();
+        pax_orientation_t ori = PAX_O_UPRIGHT;
+        switch (rot) {
+            case BSP_DISPLAY_ROTATION_90:  ori = PAX_O_ROT_CCW;  break;
+            case BSP_DISPLAY_ROTATION_180: ori = PAX_O_ROT_HALF; break;
+            case BSP_DISPLAY_ROTATION_270: ori = PAX_O_ROT_CW;   break;
+            default: break;
         }
-
-        // Initialize graphics stack
-        printf("Initializing framebuffer with w=%d h=%d format=%d endian=%d orientation=%d\n", display_h_res,
-               display_v_res, format, display_data_endian, orientation);
-        pax_buf_init(&fb, NULL, display_h_res, display_v_res, format);
+        pax_buf_init(&fb, NULL, display_h_res, display_v_res, fmt);
         pax_buf_reversed(&fb, display_data_endian == BSP_DISPLAY_ENDIAN_BIG);
-#if defined(CONFIG_BSP_TARGET_KAMI)
-        // Temporary addition for supporting Kami
-        fb.palette      = palette;
-        fb.palette_size = sizeof(palette) / sizeof(pax_col_t);
-#endif
-        pax_buf_set_orientation(&fb, orientation);
-    } else {
-        ESP_LOGI(TAG, "This board has no display support");
+        pax_buf_set_orientation(&fb, ori);
     }
 
-    // Get input event queue from BSP
     ESP_ERROR_CHECK(bsp_input_get_queue(&input_event_queue));
 
-    // LEDs
-    bsp_led_set_pixel(0, 0xFF0000);  // Red
-    bsp_led_set_pixel(1, 0x00FF00);  // Green
-    bsp_led_set_pixel(2, 0x0000FF);  // Blue
-    bsp_led_set_pixel(3, 0xFFFF00);  // Yellow
-    bsp_led_set_pixel(4, 0x00FFFF);  // Magenta
-    bsp_led_set_pixel(5, 0xFF00FF);  // Cyan
-    bsp_led_send();                  // Send data to the coprocessor
-    bsp_led_set_mode(false);         // Take control over all LEDs by disabling automatic mode
-
-    // Start WiFi stack (if your app does not require WiFi or BLE you can remove this section)
-    pax_background(&fb, BLACK);
-    pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 0, "Connecting to radio...");
-    blit();
-
+    // WiFi init (required init order per Tanmatsu docs)
+    show_message("Starting WiFi radio...");
     if (wifi_remote_initialize() == ESP_OK) {
-        display_message("Starting WiFi stack...");
-        wifi_connection_init_stack();  // Start the Espressif WiFi stack
-
-        display_message("Connecting to WiFi network...");
-
-        if (wifi_connect_try_all() == ESP_OK) {
-            display_message("Successfully connected to WiFi network");
-        } else {
-            display_message("Failed to connect to WiFi network");
-        }
+        show_message("Starting WiFi stack...");
+        wifi_connection_init_stack();
+        wifi_ready = true;
     } else {
         bsp_power_set_radio_state(BSP_POWER_RADIO_STATE_OFF);
-        ESP_LOGE(TAG, "WiFi radio not responding, WiFi not available");
-        display_message("WiFi radio unavailable");
+        ESP_LOGE(TAG, "WiFi radio unavailable");
+        show_message("WiFi radio unavailable - cannot scan");
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
-    vTaskDelay(pdMS_TO_TICKS(500));
+    if (wifi_ready) do_scan();
+    render();
 
-    // Main section of the app
-
-    // This example shows how to read from the BSP event queue to read input events
-
-    // If you want to run something at an interval in this same main thread you can replace portMAX_DELAY with an amount
-    // of ticks to wait, for example pdMS_TO_TICKS(1000)
-
-    display_message("Welcome! Press any key to trigger an event.");
-
+    // Main loop
     while (1) {
         bsp_input_event_t event;
-        if (xQueueReceive(input_event_queue, &event, portMAX_DELAY) == pdTRUE) {
-            switch (event.type) {
-                case INPUT_EVENT_TYPE_KEYBOARD: {
-                    if (event.args_keyboard.ascii != '\b' ||
-                        event.args_keyboard.ascii != '\t') {  // Ignore backspace & tab keyboard events
-                        if (pax_buf_get_height(&fb) <= 128) {
-                            char text[64];
-                            snprintf(text, sizeof(text), "%c %s M=%02" PRIx32, event.args_keyboard.ascii,
-                                     event.args_keyboard.utf8, event.args_keyboard.modifiers);
-                            display_message(text);
-                        } else {
-                            ESP_LOGI(TAG, "Keyboard event %c (%02x) %s", event.args_keyboard.ascii,
-                                     (uint8_t)event.args_keyboard.ascii, event.args_keyboard.utf8);
-                            if (pax_buf_get_width(&fb) > 0) {
-                                pax_simple_rect(&fb, BLACK, 0, 0, pax_buf_get_width(&fb), 72);
-                                pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 0, "Keyboard event");
-                                char text[64];
-                                snprintf(text, sizeof(text), "ASCII:     %c (0x%02x)", event.args_keyboard.ascii,
-                                         (uint8_t)event.args_keyboard.ascii);
-                                pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 18, text);
-                                snprintf(text, sizeof(text), "UTF-8:     %s", event.args_keyboard.utf8);
-                                pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 36, text);
-                                snprintf(text, sizeof(text), "Modifiers: 0x%0" PRIX32, event.args_keyboard.modifiers);
-                                pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 54, text);
-                                blit();
-                            }
-                        }
-                    }
-                    break;
-                }
-                case INPUT_EVENT_TYPE_NAVIGATION: {
-                    ESP_LOGI(TAG, "Navigation event %0" PRIX32 ": %s", (uint32_t)event.args_navigation.key,
-                             event.args_navigation.state ? "pressed" : "released");
+        if (xQueueReceive(input_event_queue, &event, portMAX_DELAY) != pdTRUE) continue;
 
-                    if (event.args_navigation.key == BSP_INPUT_NAVIGATION_KEY_F1) {
-                        bsp_device_restart_to_launcher();
-                    }
-                    if (event.args_navigation.key == BSP_INPUT_NAVIGATION_KEY_F2) {
-                        bsp_input_set_backlight_brightness(0);
-                    }
-                    if (event.args_navigation.key == BSP_INPUT_NAVIGATION_KEY_F3) {
-                        bsp_input_set_backlight_brightness(100);
-                    }
+        if (event.type == INPUT_EVENT_TYPE_NAVIGATION && event.args_navigation.state) {
+            if (event.args_navigation.key == BSP_INPUT_NAVIGATION_KEY_F1) {
+                bsp_device_restart_to_launcher();
+            }
+        }
 
-                    if (pax_buf_get_height(&fb) <= 128) {
-                        char text[64];
-                        snprintf(text, sizeof(text), "%02" PRIx32 " %s M=%02" PRIx32,
-                                 (uint32_t)event.args_navigation.key, event.args_navigation.state ? "P" : "R",
-                                 event.args_navigation.modifiers);
-                        display_message(text);
-                    } else {
-                        pax_simple_rect(&fb, BLACK, 0, 100, pax_buf_get_width(&fb), 72);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 100 + 0, "Navigation event");
-                        char text[64];
-                        snprintf(text, sizeof(text), "Key:       0x%0" PRIX32, (uint32_t)event.args_navigation.key);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 100 + 18, text);
-                        snprintf(text, sizeof(text), "State:     %s",
-                                 event.args_navigation.state ? "pressed" : "released");
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 100 + 36, text);
-                        snprintf(text, sizeof(text), "Modifiers: 0x%0" PRIX32, event.args_navigation.modifiers);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 100 + 54, text);
-                        blit();
-                    }
-                    break;
+        if (event.type == INPUT_EVENT_TYPE_KEYBOARD) {
+            char c = event.args_keyboard.ascii;
+
+            if (c == 0x1B) { // ESC
+                bsp_device_restart_to_launcher();
+
+            } else if (c == '\t') { // Tab — cycle views
+                view = (view + 1) % 3;
+                list_scroll = 0;
+                render();
+
+            } else if (c == 'r' || c == 'R') { // Rescan
+                if (wifi_ready) {
+                    do_scan();
+                    render();
                 }
-                case INPUT_EVENT_TYPE_ACTION: {
-                    ESP_LOGI(TAG, "Action event 0x%0" PRIX32 ": %s", (uint32_t)event.args_action.type,
-                             event.args_action.state ? "yes" : "no");
-                    if (pax_buf_get_height(&fb) <= 128) {
-                        char text[64];
-                        snprintf(text, sizeof(text), "%02" PRIx32 " %s" PRIx32, (uint32_t)event.args_action.type,
-                                 event.args_action.state ? "Y" : "N");
-                        display_message(text);
-                    } else {
-                        pax_simple_rect(&fb, BLACK, 0, 200 + 0, pax_buf_get_width(&fb), 72);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 200 + 0, "Action event");
-                        char text[64];
-                        snprintf(text, sizeof(text), "Type:      0x%0" PRIX32, (uint32_t)event.args_action.type);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 200 + 36, text);
-                        snprintf(text, sizeof(text), "State:     %s", event.args_action.state ? "yes" : "no");
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 200 + 54, text);
-                        blit();
-                    }
-                    break;
+
+            } else if ((c == 'w' || c == 'W') && view == VIEW_LIST) { // Scroll up
+                if (list_scroll > 0) {
+                    list_scroll--;
+                    render();
                 }
-                case INPUT_EVENT_TYPE_SCANCODE: {
-                    ESP_LOGI(TAG, "Scancode event 0x%0" PRIX32, (uint32_t)event.args_scancode.scancode);
-                    if (pax_buf_get_width(&fb) > 0) {
-                        pax_simple_rect(&fb, BLACK, 0, 300 + 0, pax_buf_get_width(&fb), 72);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 300 + 0, "Scancode event");
-                        char text[64];
-                        snprintf(text, sizeof(text), "Scancode:  0x%0" PRIX32, (uint32_t)event.args_scancode.scancode);
-                        pax_draw_text(&fb, WHITE, pax_font_sky_mono, 16, 0, 300 + 36, text);
-                        blit();
-                    }
-                    break;
+
+            } else if ((c == 's' || c == 'S') && view == VIEW_LIST) { // Scroll down
+                int w_val = pax_buf_get_width(&fb);
+                int h_val = pax_buf_get_height(&fb);
+                int row_h   = 24;
+                int max_vis = (h_val - 28 - 22 - row_h) / row_h;
+                if (list_scroll + max_vis < ap_count) {
+                    list_scroll++;
+                    render();
                 }
-                default:
-                    break;
             }
         }
     }

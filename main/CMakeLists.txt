@@ -21,3 +21,4 @@ idf_component_register(
 
 idf_build_set_property(COMPILE_OPTIONS "-Wno-error=unused-variable" APPEND)
 idf_build_set_property(COMPILE_OPTIONS "-Wno-error=unused-const-variable" APPEND)
+target_link_libraries(${COMPONENT_LIB} INTERFACE m)
