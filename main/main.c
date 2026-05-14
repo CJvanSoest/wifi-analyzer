@@ -50,9 +50,10 @@ static pax_buf_t                  fb                   = {0};
 static QueueHandle_t              input_event_queue    = NULL;
 
 // App state
-static wifi_ap_record_t *ap_list  = NULL;
-static uint16_t          ap_count = 0;
-static int               view     = VIEW_CHANNELS;
+static wifi_ap_record_t *ap_list      = NULL;
+static uint16_t          ap_count     = 0;
+static int               view         = VIEW_CHANNELS;
+static bool              show_hidden  = false;
 static int               list_scroll = 0;
 static bool              wifi_ready  = false;
 
@@ -147,8 +148,11 @@ static void render_footer(void) {
     int w = pax_buf_get_width(&fb);
     int h = pax_buf_get_height(&fb);
     pax_simple_rect(&fb, COLOR_HEADER, 0, h - 22, w, 22);
-    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, 8, h - 17,
-                  "F1/ESC=Exit  Tab=Switch View  R=Rescan  W/S=Scroll");
+    char footer[80];
+    snprintf(footer, sizeof(footer),
+             "F1/ESC=Exit  Tab=View  R=Rescan  W/S=Scroll  H=Hidden(%s)",
+             show_hidden ? "on" : "off");
+    pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, 8, h - 17, footer);
 }
 
 static void render_channels(void) {
@@ -301,18 +305,24 @@ static void render_graph(void) {
     float rssi_range   = 70.0f;  // -95 to -25
     float sigma        = 1.8f;   // bell width in channel units (~3 channels wide)
 
-    // Draw one curve per AP, limit to 15 to avoid clutter
-    int draw_count = ap_count < 15 ? ap_count : 15;
+    // Build draw list: skip hidden SSIDs unless show_hidden is on (max 15)
+    int draw_indices[15];
+    int draw_count = 0;
+    for (int i = 0; i < ap_count && draw_count < 15; i++) {
+        if (!show_hidden && strlen((char *)ap_list[i].ssid) == 0) continue;
+        draw_indices[draw_count++] = i;
+    }
 
     // Draw each curve as a polyline (not filled) — 1px wide line per AP
-    for (int i = draw_count - 1; i >= 0; i--) {
+    for (int di = draw_count - 1; di >= 0; di--) {
+        int   i         = draw_indices[di];
         float mu        = (float)ap_list[i].primary;
         float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
         if (norm_rssi < 0.0f) norm_rssi = 0.0f;
         if (norm_rssi > 1.0f) norm_rssi = 1.0f;
 
         float     peak_h = norm_rssi * (float)content_h;
-        pax_col_t color  = GRAPH_COLORS[i % 10];
+        pax_col_t color  = GRAPH_COLORS[di % 10];
 
         int prev_y = bottom;
         for (int px = 0; px < w; px++) {
@@ -337,7 +347,8 @@ static void render_graph(void) {
     int placed_y[15] = {0};
     int placed_count = 0;
 
-    for (int i = 0; i < draw_count; i++) {
+    for (int di = 0; di < draw_count; di++) {
+        int     i  = draw_indices[di];
         uint8_t ch = ap_list[i].primary;
         if (ch < 1 || ch > 13) continue;
 
@@ -354,7 +365,7 @@ static void render_graph(void) {
             moved = false;
             for (int j = 0; j < placed_count; j++) {
                 if (abs(placed_x[j] - peak_px) < 92 && abs(placed_y[j] - lbl_y) < 14) {
-                    lbl_y = placed_y[j] + 14; // shift below conflicting label
+                    lbl_y = placed_y[j] + 14;
                     moved = true;
                 }
             }
@@ -369,13 +380,13 @@ static void render_graph(void) {
         // Build label: number + SSID (or OUI for hidden)
         char lbl[20];
         if (strlen((char *)ap_list[i].ssid) == 0) {
-            snprintf(lbl, sizeof(lbl), "%d:%02X:%02X:%02X", i + 1,
+            snprintf(lbl, sizeof(lbl), "%d:%02X:%02X:%02X", di + 1,
                      ap_list[i].bssid[0], ap_list[i].bssid[1], ap_list[i].bssid[2]);
         } else {
-            snprintf(lbl, sizeof(lbl), "%d:%.12s", i + 1, (char *)ap_list[i].ssid);
+            snprintf(lbl, sizeof(lbl), "%d:%.12s", di + 1, (char *)ap_list[i].ssid);
         }
 
-        pax_col_t color = GRAPH_COLORS[i % 10];
+        pax_col_t color = GRAPH_COLORS[di % 10];
         pax_simple_rect(&fb, 0xCC0D1117, peak_px - 2, lbl_y - 1, 92, 14);
         pax_draw_text(&fb, color, pax_font_sky_mono, 12, peak_px, lbl_y, lbl);
     }
@@ -482,6 +493,10 @@ void app_main(void) {
                     do_scan();
                     render();
                 }
+
+            } else if (c == 'h' || c == 'H') { // Toggle hidden in graph view
+                show_hidden = !show_hidden;
+                render();
 
             } else if ((c == 'w' || c == 'W') && view == VIEW_LIST) { // Scroll up
                 if (list_scroll > 0) {
