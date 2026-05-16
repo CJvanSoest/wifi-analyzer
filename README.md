@@ -1,11 +1,38 @@
-# Tanmatsu template app project
+# WiFi Analyzer for Tanmatsu
 
-This template project shows how to build an app for Tanmatsu using the [PAX graphics](https://github.com/robotman2412/pax-graphics/tree/release/1.1.1/docs) library.
+A 2.4 GHz WiFi channel analyzer app for the [Tanmatsu](https://tanmatsu.cloud)
+badge (ESP32-P4).
 
-For more information visit the [documentation website](https://docs.tanmatsu.cloud).
+## Features
+
+- **Channels view** — bar chart showing signal strength per 2.4 GHz channel (1–14)
+- **List view** — table with SSID, channel, RSSI, and security type
+- **Graph view** — live signal history curves per SSID with label de-collision
+- Hidden SSID support (shows BSSID instead of name; toggle with H)
+- Dark theme
+
+## Controls
+
+| Key | Action |
+|---|---|
+| Tab | Switch view (Channels → List → Graph) |
+| R | Rescan |
+| W / S | Scroll (List view) |
+| H | Toggle hidden SSIDs |
+| F1 / Red X | Exit to launcher |
+
+## Building
+
+Requires the Tanmatsu ESP-IDF toolchain (ESP-IDF v5.5.1 pinned locally).
+
+```sh
+unset IDF_PATH && unset IDF_TOOLS_PATH && make build
+```
 
 ## License
 
-The contents of this repository may be considered in the public domain or [CC0-1.0](https://creativecommons.org/publicdomain/zero/1.0) licensed at your disposal.
+MIT — see [LICENSE](LICENSE).
 
-At Nicolai Electronics we love open source so we recommend licensing your work based on this template under terms of the [MIT license](https://opensource.org/license/mit). The MIT license allows others to build upon your work without restrictions while also making sure you retain your attribution.
+Developed by **CJ van Soest** with **Claude AI** (Anthropic) as AI co-author.
+
+Badge BSP and template by [Nicolai Electronics](https://tanmatsu.cloud) (MIT/CC0).

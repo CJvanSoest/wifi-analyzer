@@ -1,3 +1,16 @@
+/*
+ * WiFi Analyzer for Tanmatsu
+ *
+ * A 2.4 GHz WiFi channel analyzer for the Tanmatsu badge (ESP32-P4).
+ * Shows channel occupation (bar chart), network list (SSID/CH/RSSI/security),
+ * and signal history graph per SSID.
+ *
+ * SPDX-FileCopyrightText: 2026 CJ van Soest
+ * SPDX-License-Identifier: MIT
+ *
+ * Developed with Claude AI (Anthropic) as AI co-author.
+ */
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
