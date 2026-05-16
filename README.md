@@ -29,16 +29,20 @@ Bar chart showing the combined signal strength per 2.4 GHz channel (1–14).
 Useful for quickly spotting congested channels.
 
 ### List
-Sortable table of all detected networks with:
-- SSID (or BSSID for hidden networks)
-- Channel
-- RSSI (signal strength in dBm)
-- Security type (Open / WPA2 / WPA3 / etc.)
+Table of all detected networks sorted by signal strength, with:
+- SSID (or BSSID for hidden networks), colored per MAC address
+- Channel, RSSI (color-coded), Security type
+
+Navigate with W/S or arrow keys and press **Enter** to open the detail screen.
+
+### Detail
+Full per-network breakdown: BSSID, channel, RSSI, auth/cipher mode,
+bandwidth (20/40/80/160 MHz), PHY standards (11b/g/n/a/ac/ax), WPS, FTM, country.
 
 ### Graph
-Live signal history curves per SSID, with automatic label de-collision so
-overlapping network names stay readable. Hidden SSIDs are hidden by default
-(toggle with H).
+Gaussian arch line curves per AP, bandwidth-scaled and color-coded by MAC address.
+A legend strip below the axis shows each AP's color, SSID, and bandwidth.
+Hidden SSIDs are hidden by default (toggle with H).
 
 ---
 
@@ -48,7 +52,9 @@ overlapping network names stay readable. Hidden SSIDs are hidden by default
 |---|---|
 | Tab | Cycle views (Channels → List → Graph) |
 | R | Rescan |
-| W / S | Scroll up / down (List view) |
+| W / S or ↑ / ↓ | Navigate list |
+| Enter | Open network detail |
+| ESC | Back to list (from detail) |
 | H | Toggle hidden SSIDs |
 | F1 / Red X | Exit to launcher |
 
@@ -80,3 +86,7 @@ Developed by **CJ van Soest** with **[Claude AI](https://claude.ai)** (Anthropic
 as AI co-author.
 
 Badge BSP and template by [Nicolai Electronics](https://tanmatsu.cloud) (MIT/CC0).
+
+Feature concept and inspiration credit: **[Saarbastler](https://git.adminforge.de/jjp)**
+(tanmatsu-wifi-scanner, MIT) — network list navigation, per-AP detail screen,
+and frequency graph with bandwidth-scaled channel visualization.
