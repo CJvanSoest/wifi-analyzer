@@ -8,3 +8,4 @@ sdkconfig
 sdkconfig_*
 sdkconfig.old
 .submodules_update_done
+.DS_Store
