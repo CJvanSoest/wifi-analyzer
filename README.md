@@ -72,6 +72,13 @@ Hidden SSIDs are hidden by default (toggle with H).
 
 ---
 
+## Development write-up
+
+Read about the development journey and lessons learned on Medium:
+[Building a WiFi Analyzer on the Tanmatsu Badge](https://medium.com/@cjvansoest/building-a-wifi-analyzer-on-the-tanmatsu-badge-da74dd95209c)
+
+---
+
 ## Building
 
 Requires the Tanmatsu ESP-IDF toolchain. Clone the
