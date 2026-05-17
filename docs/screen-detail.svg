@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiFi Analyzer — Detail view · HomeNetwork selected (800×480 landscape)   -->
+<!-- lx=14 (labels)  vx=200 (values)  row=20px  font-size=13                 -->
+<svg width="800" height="480" viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>text { font-family: 'Courier New', Courier, monospace; }</style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="480" fill="#0D1117"/>
+
+  <!-- Header bar -->
+  <rect width="800" height="28" fill="#161B22"/>
+  <text x="8" y="6" font-size="16" fill="#539BF5" dominant-baseline="hanging">WiFi Analyzer  8 networks  [Detail]</text>
+
+  <!-- Footer bar -->
+  <rect y="458" width="800" height="22" fill="#161B22"/>
+  <text x="8" y="463" font-size="13" fill="#768390" dominant-baseline="hanging">any key=back to list  F1/ESC=Exit</text>
+
+  <!-- ── SSID title row (font-size=18, y=30, top=28+2=30) ──────────────────── -->
+  <text x="14" y="30" font-size="18" fill="#539BF5" dominant-baseline="hanging">HomeNetwork</text>
+
+  <!-- Separator line (top=52, then +4=56 for first field) -->
+  <line x1="14" y1="52" x2="786" y2="52" stroke="#768390" stroke-width="1"/>
+
+  <!-- ── Field rows · label COLOR_DIM · value COLOR_TEXT · row=20px ─────────── -->
+  <!-- y=56  BSSID -->
+  <text x="14"  y="58" font-size="13" fill="#768390" dominant-baseline="hanging">BSSID:</text>
+  <text x="200" y="58" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">A4:C3:F0:12:34:56</text>
+
+  <!-- y=76  Channel -->
+  <text x="14"  y="78" font-size="13" fill="#768390" dominant-baseline="hanging">Channel:</text>
+  <text x="200" y="78" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">6</text>
+
+  <!-- y=96  RSSI (color = GOOD #57AB5A) -->
+  <text x="14"  y="98" font-size="13" fill="#768390" dominant-baseline="hanging">RSSI:</text>
+  <text x="200" y="98" font-size="13" fill="#57AB5A" dominant-baseline="hanging">-52 dBm</text>
+
+  <!-- y=116  Auth -->
+  <text x="14"  y="118" font-size="13" fill="#768390" dominant-baseline="hanging">Auth:</text>
+  <text x="200" y="118" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">WPA2-PSK</text>
+
+  <!-- y=136  Pair cipher -->
+  <text x="14"  y="138" font-size="13" fill="#768390" dominant-baseline="hanging">Pair cipher:</text>
+  <text x="200" y="138" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">CCMP</text>
+
+  <!-- y=156  Group cipher -->
+  <text x="14"  y="158" font-size="13" fill="#768390" dominant-baseline="hanging">Group cipher:</text>
+  <text x="200" y="158" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">CCMP</text>
+
+  <!-- y=176  Bandwidth -->
+  <text x="14"  y="178" font-size="13" fill="#768390" dominant-baseline="hanging">Bandwidth:</text>
+  <text x="200" y="178" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">40 MHz</text>
+
+  <!-- y=196  PHY modes -->
+  <text x="14"  y="198" font-size="13" fill="#768390" dominant-baseline="hanging">PHY:</text>
+  <text x="200" y="198" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">11b 11g 11n </text>
+
+  <!-- y=216  WPS -->
+  <text x="14"  y="218" font-size="13" fill="#768390" dominant-baseline="hanging">WPS:</text>
+  <text x="200" y="218" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">yes</text>
+
+  <!-- y=236  Country -->
+  <text x="14"  y="238" font-size="13" fill="#768390" dominant-baseline="hanging">Country:</text>
+  <text x="200" y="238" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">NL</text>
+</svg>

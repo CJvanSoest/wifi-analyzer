@@ -62,7 +62,13 @@ Hidden SSIDs are hidden by default (toggle with H).
 
 ## Screenshots
 
-*(Coming soon)*
+| Channels | List |
+|---|---|
+| ![Channels](docs/screen-channels.svg) | ![List](docs/screen-list.svg) |
+
+| Graph | Detail |
+|---|---|
+| ![Graph](docs/screen-graph.svg) | ![Detail](docs/screen-detail.svg) |
 
 ---
 

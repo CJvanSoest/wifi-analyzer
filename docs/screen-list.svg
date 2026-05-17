@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiFi Analyzer — List view (800×480 landscape) -->
+<svg width="800" height="480" viewBox="0 0 800 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>text { font-family: 'Courier New', Courier, monospace; }</style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="480" fill="#0D1117"/>
+
+  <!-- Header bar -->
+  <rect width="800" height="28" fill="#161B22"/>
+  <text x="8" y="6" font-size="16" fill="#539BF5" dominant-baseline="hanging">WiFi Analyzer  8 networks  [List]</text>
+  <!-- Scroll indicator -->
+  <text x="730" y="8" font-size="13" fill="#768390" dominant-baseline="hanging">1/8</text>
+
+  <!-- Footer bar -->
+  <rect y="458" width="800" height="22" fill="#161B22"/>
+  <text x="8" y="463" font-size="13" fill="#768390" dominant-baseline="hanging">F1/ESC=Exit  Tab=View  R=Rescan  W/S=Navigate  Enter=Detail  H=Hidden</text>
+
+  <!-- ── Column header row (y=28, h=24) ────────────────────────────────────── -->
+  <rect y="28" width="800" height="24" fill="#161B22"/>
+  <text x="10"  y="33" font-size="13" fill="#768390" dominant-baseline="hanging">SSID</text>
+  <text x="630" y="33" font-size="13" fill="#768390" dominant-baseline="hanging">CH</text>
+  <text x="680" y="33" font-size="13" fill="#768390" dominant-baseline="hanging">RSSI</text>
+  <text x="740" y="33" font-size="13" fill="#768390" dominant-baseline="hanging">SEC</text>
+
+  <!-- ── Data rows (top=52, row_h=24) ──────────────────────────────────────── -->
+  <!-- Networks sorted by RSSI desc: −52, −65, −68, −71, −78, −79, −82, −84  -->
+
+  <!-- Row 0  HomeNetwork    −52  ch6  lock  SELECTED -->
+  <rect y="52" width="800" height="24" fill="#1F3044"/>
+  <text x="2"   y="57" font-size="14" fill="#539BF5" dominant-baseline="hanging">&gt;</text>
+  <text x="14"  y="57" font-size="14" fill="#539BF5" dominant-baseline="hanging">HomeNetwork</text>
+  <text x="630" y="57" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 6</text>
+  <text x="680" y="57" font-size="14" fill="#57AB5A" dominant-baseline="hanging"> -52</text>
+  <text x="740" y="57" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+
+  <!-- Row 1  AndroidAP_5E2A  −65  ch11  lock  ALT -->
+  <rect y="76" width="800" height="24" fill="#1C2128"/>
+  <text x="14"  y="81" font-size="14" fill="#57AB5A" dominant-baseline="hanging">AndroidAP_5E2A</text>
+  <text x="630" y="81" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">11</text>
+  <text x="680" y="81" font-size="14" fill="#CFBA06" dominant-baseline="hanging"> -65</text>
+  <text x="740" y="81" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+
+  <!-- Row 2  Telenet-3F8A   −68  ch11  lock -->
+  <text x="14"  y="105" font-size="14" fill="#DB6D28" dominant-baseline="hanging">Telenet-3F8A</text>
+  <text x="630" y="105" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">11</text>
+  <text x="680" y="105" font-size="14" fill="#CFBA06" dominant-baseline="hanging"> -68</text>
+  <text x="740" y="105" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+
+  <!-- Row 3  Buren_2.4G     −71  ch6   lock  ALT -->
+  <rect y="124" width="800" height="24" fill="#1C2128"/>
+  <text x="14"  y="129" font-size="14" fill="#E5534B" dominant-baseline="hanging">Buren_2.4G</text>
+  <text x="630" y="129" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 6</text>
+  <text x="680" y="129" font-size="14" fill="#CFBA06" dominant-baseline="hanging"> -71</text>
+  <text x="740" y="129" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+
+  <!-- Row 4  KPN_Hotspot    −78  ch1   open -->
+  <text x="14"  y="153" font-size="14" fill="#CFBA06" dominant-baseline="hanging">KPN_Hotspot</text>
+  <text x="630" y="153" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 1</text>
+  <text x="680" y="153" font-size="14" fill="#DB6D28" dominant-baseline="hanging"> -78</text>
+  <text x="740" y="153" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">open</text>
+
+  <!-- Row 5  D6:C9:E3:...(hidden) −79 ch6 lock  ALT -->
+  <rect y="172" width="800" height="24" fill="#1C2128"/>
+  <text x="14"  y="177" font-size="14" fill="#DCAEFA" dominant-baseline="hanging">D6:C9:E3:11:22:33</text>
+  <text x="630" y="177" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 6</text>
+  <text x="680" y="177" font-size="14" fill="#DB6D28" dominant-baseline="hanging"> -79</text>
+  <text x="740" y="177" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+
+  <!-- Row 6  FRITZ!Box 7490 −82  ch1   lock -->
+  <text x="14"  y="201" font-size="14" fill="#6CB6FF" dominant-baseline="hanging">FRITZ!Box 7490</text>
+  <text x="630" y="201" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 1</text>
+  <text x="680" y="201" font-size="14" fill="#E5534B" dominant-baseline="hanging"> -82</text>
+  <text x="740" y="201" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+
+  <!-- Row 7  Ziggo-123456   −84  ch3   lock  ALT -->
+  <rect y="220" width="800" height="24" fill="#1C2128"/>
+  <text x="14"  y="225" font-size="14" fill="#FFA657" dominant-baseline="hanging">Ziggo-123456</text>
+  <text x="630" y="225" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 3</text>
+  <text x="680" y="225" font-size="14" fill="#E5534B" dominant-baseline="hanging"> -84</text>
+  <text x="740" y="225" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>
+</svg>
