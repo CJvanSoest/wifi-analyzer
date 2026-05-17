@@ -64,7 +64,7 @@
 
   <!-- Row 5  D6:C9:E3:...(hidden) −79 ch6 lock  ALT -->
   <rect y="172" width="800" height="24" fill="#1C2128"/>
-  <text x="14"  y="177" font-size="14" fill="#DCAEFA" dominant-baseline="hanging">D6:C9:E3:11:22:33</text>
+  <text x="14"  y="177" font-size="14" fill="#DCAEFA" dominant-baseline="hanging">02:00:00:DD:EE:FF</text>
   <text x="630" y="177" font-size="14" fill="#CDD9E5" dominant-baseline="hanging"> 6</text>
   <text x="680" y="177" font-size="14" fill="#DB6D28" dominant-baseline="hanging"> -79</text>
   <text x="740" y="177" font-size="14" fill="#CDD9E5" dominant-baseline="hanging">lock</text>

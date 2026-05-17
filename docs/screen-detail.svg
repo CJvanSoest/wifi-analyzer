@@ -26,7 +26,7 @@
   <!-- ── Field rows · label COLOR_DIM · value COLOR_TEXT · row=20px ─────────── -->
   <!-- y=56  BSSID -->
   <text x="14"  y="58" font-size="13" fill="#768390" dominant-baseline="hanging">BSSID:</text>
-  <text x="200" y="58" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">A4:C3:F0:12:34:56</text>
+  <text x="200" y="58" font-size="13" fill="#CDD9E5" dominant-baseline="hanging">02:00:00:AA:BB:CC</text>
 
   <!-- y=76  Channel -->
   <text x="14"  y="78" font-size="13" fill="#768390" dominant-baseline="hanging">Channel:</text>
