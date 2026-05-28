@@ -1,0 +1,19 @@
+{
+    "name": "WiFi Analyzer",
+    "description": "WiFi-scanner: APs, kanalen, signaalsterkte.",
+    "version": "1.0.0",
+    "author": "CJ van Soest",
+    "license_type": "MIT",
+    "categories": ["utility", "wifi"],
+    "icon": {
+        "32x32": "icon32.png"
+    },
+    "application": [
+        {
+            "type": "appfs",
+            "executable": "wifianalyzer.bin",
+            "revision": 1,
+            "targets": ["tanmatsu", "konsool"]
+        }
+    ]
+}
