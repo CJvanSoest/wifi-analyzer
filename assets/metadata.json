@@ -1,6 +1,6 @@
 {
     "name": "WiFi Analyzer",
-    "description": "2.4 GHz WiFi scanner - channel chart network list and frequency graph",
+    "description": "2.4 GHz WiFi scanner",
     "version": "1.0.1",
     "author": "CJ van Soest",
     "license_type": "MIT",
