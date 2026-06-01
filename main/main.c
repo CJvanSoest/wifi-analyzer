@@ -320,11 +320,73 @@ static int list_max_vis(void) {
     return (h - 28 - 22 - 24) / 24;
 }
 
+static bool ap_is_hidden(int i) {
+    return strlen((char *)ap_list[i].ssid) == 0;
+}
+
+static bool ap_is_visible(int i) {
+    return show_hidden || !ap_is_hidden(i);
+}
+
+// Snap list_selected onto a visible AP (search forward, then backward).
+static void list_normalize_selection(void) {
+    if (ap_count == 0) { list_selected = 0; return; }
+    if (list_selected < 0) list_selected = 0;
+    if (list_selected >= ap_count) list_selected = ap_count - 1;
+    if (ap_is_visible(list_selected)) return;
+    for (int i = list_selected + 1; i < ap_count; i++) {
+        if (ap_is_visible(i)) { list_selected = i; return; }
+    }
+    for (int i = list_selected - 1; i >= 0; i--) {
+        if (ap_is_visible(i)) { list_selected = i; return; }
+    }
+}
+
+// Move selection to next/prev visible AP, skipping filtered ones.
+static void list_step(int dir) {
+    if (ap_count == 0) return;
+    int i = list_selected + dir;
+    while (i >= 0 && i < ap_count) {
+        if (ap_is_visible(i)) { list_selected = i; return; }
+        i += dir;
+    }
+}
+
 static void render_list(void) {
     int w       = pax_buf_get_width(&fb);
     int top     = 28;
     int row_h   = 24;
     int max_vis = list_max_vis();
+
+    // Count visible + hidden, and find sel_vis (position of list_selected in visible order).
+    int vis_count = 0, hidden_count = 0, sel_vis = -1;
+    for (int i = 0; i < ap_count; i++) {
+        if (ap_is_hidden(i)) hidden_count++;
+        if (ap_is_visible(i)) {
+            if (i == list_selected) sel_vis = vis_count;
+            vis_count++;
+        }
+    }
+
+    // Selection was filtered out (e.g. just toggled H off while on a hidden row): snap.
+    if (sel_vis < 0 && vis_count > 0) {
+        list_normalize_selection();
+        vis_count = 0; sel_vis = -1;
+        for (int i = 0; i < ap_count; i++) {
+            if (ap_is_visible(i)) {
+                if (i == list_selected) sel_vis = vis_count;
+                vis_count++;
+            }
+        }
+    }
+
+    // Keep the cursor on-screen (scroll is now in visible-index space).
+    if (sel_vis >= 0) {
+        if (sel_vis < list_scroll)            list_scroll = sel_vis;
+        if (sel_vis >= list_scroll + max_vis) list_scroll = sel_vis - max_vis + 1;
+    }
+    if (list_scroll > vis_count - max_vis) list_scroll = vis_count - max_vis;
+    if (list_scroll < 0)                   list_scroll = 0;
 
     // Column headers
     pax_simple_rect(&fb, COLOR_HEADER, 0, top, w, row_h);
@@ -334,55 +396,81 @@ static void render_list(void) {
     pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 60,  top + 5, "SEC");
     top += row_h;
 
-    if (ap_count > (uint16_t)max_vis) {
-        char info[20];
-        snprintf(info, sizeof(info), "%d/%u", list_selected + 1, ap_count);
-        pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 70, 8, info);
+    // Counter top-right: "k/total" plus "(+N hidden, H)" hint when filtered.
+    if (vis_count > 0) {
+        char info[64];
+        if (!show_hidden && hidden_count > 0) {
+            snprintf(info, sizeof(info), "%d/%d (+%d hidden H)",
+                     sel_vis + 1, vis_count, hidden_count);
+            pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 210, 8, info);
+        } else if (vis_count > max_vis) {
+            snprintf(info, sizeof(info), "%d/%d", sel_vis + 1, vis_count);
+            pax_draw_text(&fb, COLOR_DIM, pax_font_sky_mono, 13, w - 70, 8, info);
+        }
     }
 
-    for (int i = list_scroll; i < ap_count && (i - list_scroll) < max_vis; i++) {
-        int y = top + (i - list_scroll) * row_h;
+    // Walk ap_list, but only render the v-th visible entry; row index in viewport is (v - list_scroll).
+    int v = 0;
+    for (int i = 0; i < ap_count; i++) {
+        if (!ap_is_visible(i)) continue;
+        if (v >= list_scroll && (v - list_scroll) < max_vis) {
+            int y = top + (v - list_scroll) * row_h;
 
-        // Row background: selection highlight, alternating rows, or default
-        if (i == list_selected) {
-            pax_simple_rect(&fb, COLOR_ROW_SEL, 0, y, w, row_h);
-            // Selection cursor indicator
-            pax_draw_text(&fb, COLOR_ACCENT, pax_font_sky_mono, 14, 2, y + 5, ">");
-        } else if ((i % 2) == 0) {
-            pax_simple_rect(&fb, COLOR_ROW_ALT, 0, y, w, row_h);
+            if (v == sel_vis) {
+                pax_simple_rect(&fb, COLOR_ROW_SEL, 0, y, w, row_h);
+                pax_draw_text(&fb, COLOR_ACCENT, pax_font_sky_mono, 14, 2, y + 5, ">");
+            } else if ((v % 2) == 0) {
+                pax_simple_rect(&fb, COLOR_ROW_ALT, 0, y, w, row_h);
+            }
+
+            char ssid[33];
+            strncpy(ssid, (char *)ap_list[i].ssid, 32);
+            ssid[32] = '\0';
+            if (strlen(ssid) == 0) {
+                snprintf(ssid, sizeof(ssid), "%02X:%02X:%02X:%02X:%02X:%02X",
+                         ap_list[i].bssid[0], ap_list[i].bssid[1], ap_list[i].bssid[2],
+                         ap_list[i].bssid[3], ap_list[i].bssid[4], ap_list[i].bssid[5]);
+            }
+            pax_col_t ap_color = get_ap_color(ap_list[i].bssid);
+            pax_draw_text(&fb, ap_color, pax_font_sky_mono, 14, 14, y + 5, ssid);
+
+            char tmp[16];
+            snprintf(tmp, sizeof(tmp), "%2u", ap_list[i].primary);
+            pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, w - 170, y + 5, tmp);
+
+            snprintf(tmp, sizeof(tmp), "%4d", ap_list[i].rssi);
+            pax_draw_text(&fb, rssi_color(ap_list[i].rssi), pax_font_sky_mono, 14, w - 120, y + 5, tmp);
+
+            const char *sec = (ap_list[i].authmode == WIFI_AUTH_OPEN) ? "open" : "lock";
+            pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, w - 60, y + 5, sec);
         }
-
-        // SSID — show MAC for hidden networks
-        char ssid[33];
-        strncpy(ssid, (char *)ap_list[i].ssid, 32);
-        ssid[32] = '\0';
-        if (strlen(ssid) == 0) {
-            snprintf(ssid, sizeof(ssid), "%02X:%02X:%02X:%02X:%02X:%02X",
-                     ap_list[i].bssid[0], ap_list[i].bssid[1], ap_list[i].bssid[2],
-                     ap_list[i].bssid[3], ap_list[i].bssid[4], ap_list[i].bssid[5]);
-        }
-        pax_col_t ap_color = get_ap_color(ap_list[i].bssid);
-        pax_draw_text(&fb, ap_color, pax_font_sky_mono, 14, 14, y + 5, ssid);
-
-        char tmp[16];
-        snprintf(tmp, sizeof(tmp), "%2u", ap_list[i].primary);
-        pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, w - 170, y + 5, tmp);
-
-        snprintf(tmp, sizeof(tmp), "%4d", ap_list[i].rssi);
-        pax_draw_text(&fb, rssi_color(ap_list[i].rssi), pax_font_sky_mono, 14, w - 120, y + 5, tmp);
-
-        const char *sec = (ap_list[i].authmode == WIFI_AUTH_OPEN) ? "open" : "lock";
-        pax_draw_text(&fb, COLOR_TEXT, pax_font_sky_mono, 14, w - 60, y + 5, sec);
+        v++;
     }
 }
 
-// Draws a Gaussian arch as a connected 2px line with a very light shaded fill.
-// sigma_ch is the standard deviation in channel units.
-static void draw_arch_line(int center_x, int bottom_y, float sigma_ch, float x_scale,
+// Gaussian arch helpers — split so render_graph can stack all fills first and
+// draw the 2px strokes in a second pass on top (no line gets hidden by another
+// curve's translucent fill). sigma_ch is the standard deviation in channel units.
+static void draw_arch_fill(int center_x, int bottom_y, float sigma_ch, float x_scale,
                            float peak_h, pax_col_t color) {
     if (peak_h < 2.0f) return;
     float sigma_px = sigma_ch * x_scale;
-    pax_col_t fill = (color & 0x00FFFFFFu) | 0x30000000u;  // 19% opacity tint
+    pax_col_t fill = (color & 0x00FFFFFFu) | 0x20000000u;  // ~12% opacity tint
+    int x_start = center_x - (int)(3.5f * sigma_px);
+    int x_end   = center_x + (int)(3.5f * sigma_px);
+    for (int x = x_start; x <= x_end; x++) {
+        float dx = (float)(x - center_x);
+        float h  = peak_h * expf(-0.5f * (dx / sigma_px) * (dx / sigma_px));
+        int ih = (int)h;
+        if (ih < 1) continue;
+        pax_simple_rect(&fb, fill, x, bottom_y - ih, 1, ih);
+    }
+}
+
+static void draw_arch_stroke(int center_x, int bottom_y, float sigma_ch, float x_scale,
+                             float peak_h, pax_col_t color) {
+    if (peak_h < 2.0f) return;
+    float sigma_px = sigma_ch * x_scale;
     int x_start = center_x - (int)(3.5f * sigma_px);
     int x_end   = center_x + (int)(3.5f * sigma_px);
     int prev_top = -1;
@@ -392,9 +480,6 @@ static void draw_arch_line(int center_x, int bottom_y, float sigma_ch, float x_s
         int ih = (int)h;
         if (ih < 1) { prev_top = -1; continue; }
         int top = bottom_y - ih;
-        // Subtle fill under the curve
-        pax_simple_rect(&fb, fill, x, top, 1, ih);
-        // Solid 2px line, vertically connected to previous column (no gaps on steep slopes)
         if (prev_top < 0) prev_top = bottom_y;
         int y_hi = top < prev_top ? top     : prev_top;
         int y_lo = top > prev_top ? top + 1 : prev_top + 1;
@@ -439,20 +524,25 @@ static void render_graph(void) {
     float rssi_floor = -95.0f;
     float rssi_range = 70.0f;
 
-    // Draw half-ellipses back-to-front (weakest first so strongest on top).
-    for (int di = draw_count - 1; di >= 0; di--) {
-        int   i         = draw_indices[di];
-        float mu        = (float)ap_list[i].primary;
-        float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
-        if (norm_rssi < 0.0f) norm_rssi = 0.0f;
-        if (norm_rssi > 1.0f) norm_rssi = 1.0f;
+    // Two-pass rendering: fills first (back-to-front so they stack), then 2px
+    // strokes on top in the same order. This prevents a strong AP's translucent
+    // fill from hiding the line of a weaker AP sitting in front of it.
+    for (int pass = 0; pass < 2; pass++) {
+        for (int di = draw_count - 1; di >= 0; di--) {
+            int   i         = draw_indices[di];
+            float mu        = (float)ap_list[i].primary;
+            float norm_rssi = (ap_list[i].rssi - rssi_floor) / rssi_range;
+            if (norm_rssi < 0.0f) norm_rssi = 0.0f;
+            if (norm_rssi > 1.0f) norm_rssi = 1.0f;
 
-        float     peak_h   = norm_rssi * (float)content_h;
-        float     sigma_ch = bw_half_channels(ap_list[i].bandwidth);
-        pax_col_t color    = get_ap_color(ap_list[i].bssid);
-        int       center_x = (int)(x_margin + (mu - 1.0f) * x_scale);
+            float     peak_h   = norm_rssi * (float)content_h;
+            float     sigma_ch = bw_half_channels(ap_list[i].bandwidth);
+            pax_col_t color    = get_ap_color(ap_list[i].bssid);
+            int       center_x = (int)(x_margin + (mu - 1.0f) * x_scale);
 
-        draw_arch_line(center_x, ellipse_bottom, sigma_ch, x_scale, peak_h, color);
+            if (pass == 0) draw_arch_fill  (center_x, ellipse_bottom, sigma_ch, x_scale, peak_h, color);
+            else           draw_arch_stroke(center_x, ellipse_bottom, sigma_ch, x_scale, peak_h, color);
+        }
     }
 
     // SSID labels at dome peaks with de-collision (include bandwidth).
@@ -498,8 +588,9 @@ static void render_graph(void) {
                      (char *)ap_list[i].ssid, bw_short(ap_list[i].bandwidth));
         }
 
-        pax_col_t color = get_ap_color(ap_list[i].bssid);
-        pax_simple_rect(&fb, 0xCC0D1117, peak_px - 2, lbl_y - 1, 108, 14);
+        pax_col_t color    = get_ap_color(ap_list[i].bssid);
+        int       lbl_w    = (int)pax_text_size(pax_font_sky_mono, 12, lbl).x;
+        pax_simple_rect(&fb, 0xCC0D1117, peak_px - 2, lbl_y - 1, lbl_w + 4, 14);
         pax_draw_text(&fb, color, pax_font_sky_mono, 12, peak_px, lbl_y, lbl);
     }
 
@@ -652,17 +743,6 @@ static void render(void) {
     blit();
 }
 
-// Clamp list_selected and adjust scroll to keep it visible.
-static void list_clamp_scroll(void) {
-    if (ap_count == 0) { list_selected = 0; list_scroll = 0; return; }
-    if (list_selected < 0) list_selected = 0;
-    if (list_selected >= ap_count) list_selected = ap_count - 1;
-    int mv = list_max_vis();
-    if (list_selected < list_scroll) list_scroll = list_selected;
-    if (list_selected >= list_scroll + mv) list_scroll = list_selected - mv + 1;
-    if (list_scroll < 0) list_scroll = 0;
-}
-
 void app_main(void) {
     gpio_install_isr_service(0);
 
@@ -737,10 +817,10 @@ void app_main(void) {
                     else if (view == VIEW_DETAIL)           { view = VIEW_LIST;   render(); }
                     break;
                 case BSP_INPUT_NAVIGATION_KEY_UP:
-                    if (view == VIEW_LIST) { list_selected--; list_clamp_scroll(); render(); }
+                    if (view == VIEW_LIST) { list_step(-1); render(); }
                     break;
                 case BSP_INPUT_NAVIGATION_KEY_DOWN:
-                    if (view == VIEW_LIST) { list_selected++; list_clamp_scroll(); render(); }
+                    if (view == VIEW_LIST) { list_step(+1); render(); }
                     break;
                 case BSP_INPUT_NAVIGATION_KEY_TAB:
                     if (view != VIEW_DETAIL) { view = (view + 1) % 3; list_scroll = 0; render(); }
@@ -767,16 +847,15 @@ void app_main(void) {
 
             } else if (c == 'h' || c == 'H') {
                 show_hidden = !show_hidden;
+                list_normalize_selection();
                 render();
 
             } else if ((c == 'w' || c == 'W') && view == VIEW_LIST) {
-                list_selected--;
-                list_clamp_scroll();
+                list_step(-1);
                 render();
 
             } else if ((c == 's' || c == 'S') && view == VIEW_LIST) {
-                list_selected++;
-                list_clamp_scroll();
+                list_step(+1);
                 render();
 
             } else if ((c == '\r' || c == '\n') && view == VIEW_LIST) {
