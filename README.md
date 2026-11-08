@@ -15,10 +15,27 @@ A 2.4 GHz WiFi channel analyzer app for the **[Tanmatsu](https://tanmatsu.cloud)
 | **Application processor** | ESP32-P4 |
 | **Radio co-processor** | ESP32-C6 (used for WiFi scanning) |
 | **Display** | 4" MIPI DSI, 800×1280 px |
-| **Framework** | ESP-IDF v6.0.2 |
+| **Framework** | ESP-IDF v6.0.2, badge-bsp 2.x |
 
 The Tanmatsu is an open-source badge developed by
 [Nicolai Electronics](https://tanmatsu.cloud).
+
+From v1.0.2 the app is built for BSP 2, so it is also offered on boards with
+the second display panel. It was tested on the original panel with launcher
+0.3.1 and radio 3.4.0, not on the second panel.
+
+---
+
+## Installing
+
+Install **WiFi Analyzer** from the Tanmatsu appstore (launcher → Apps). To
+install by hand, download `wifianalyzer.bin` from the
+[latest release](https://github.com/CJvanSoest/wifi-analyzer/releases/latest)
+and upload it with [badgelink](https://github.com/badgeteam/badgelink) while the badge is in USB mode:
+
+```sh
+python badgelink.py appfs upload nl.cj.wifianalyzer "WiFi Analyzer" 0 wifianalyzer.bin
+```
 
 ---
 
@@ -81,13 +98,28 @@ Read about the development journey and lessons learned on Medium:
 
 ## Building
 
-Requires the Tanmatsu ESP-IDF toolchain. Clone the
-[Tanmatsu template](https://github.com/Nicolai-Electronics/tanmatsu-template-pax)
-first to set up the local toolchain.
+Requires ESP-IDF v6.0.2. Clone the
+[Tanmatsu template](https://github.com/Nicolai-Electronics/tanmatsu-template)
+first to set up the local toolchain, then:
 
 ```sh
 unset IDF_PATH && unset IDF_TOOLS_PATH && make build
 ```
+
+Or build in Docker, no local toolchain needed:
+
+```sh
+docker run --rm -v "$PWD":/project -w /project espressif/idf:v6.0.2 \
+  bash -lc 'git config --global --add safe.directory /project && \
+  idf.py -B build/tanmatsu build -DDEVICE=tanmatsu \
+  -DSDKCONFIG_DEFAULTS="sdkconfigs/general;sdkconfigs/tanmatsu" \
+  -DSDKCONFIG=sdkconfig_tanmatsu -DIDF_TARGET=esp32p4 -DFAT=0'
+```
+
+ESP-IDF 6 builds for the ESP32-P4X by default, which the bootloader on the
+badge rejects (blue screen, no output). `sdkconfigs/tanmatsu` therefore pins the
+chip revision to v1; keep those `CONFIG_ESP32P4_*` lines when you change the
+defaults.
 
 ---
 
