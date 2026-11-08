@@ -15,7 +15,7 @@ A 2.4 GHz WiFi channel analyzer app for the **[Tanmatsu](https://tanmatsu.cloud)
 | **Application processor** | ESP32-P4 |
 | **Radio co-processor** | ESP32-C6 (used for WiFi scanning) |
 | **Display** | 4" MIPI DSI, 800×1280 px |
-| **Framework** | ESP-IDF v5.5.1 |
+| **Framework** | ESP-IDF v6.0.2 |
 
 The Tanmatsu is an open-source badge developed by
 [Nicolai Electronics](https://tanmatsu.cloud).
